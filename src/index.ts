@@ -16,6 +16,137 @@ function shouldTransform(id: string, include: RegExp[], exclude: RegExp[]): bool
   return isIncluded && !isExcluded;
 }
 
+function findAwaitIndex(line: string): number {
+  const match = /\bawait\b/.exec(line);
+  return match ? match.index : -1;
+}
+
+function findAwaitBlockEnd(lines: string[], startLine: number, startColumn: number): number {
+  let parenDepth = 0;
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let inTemplate = false;
+  let inBlockComment = false;
+  let escaped = false;
+
+  for (let lineIndex = startLine; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex];
+    let inLineComment = false;
+    const columnStart = lineIndex === startLine ? startColumn : 0;
+
+    for (let column = columnStart; column < line.length; column++) {
+      const char = line[column];
+      const nextChar = line[column + 1] ?? '';
+
+      if (inLineComment) {
+        break;
+      }
+
+      if (inBlockComment) {
+        if (char === '*' && nextChar === '/') {
+          inBlockComment = false;
+          column += 1;
+        }
+
+        continue;
+      }
+
+      if (inSingleQuote) {
+        if (!escaped && char === "'") {
+          inSingleQuote = false;
+        }
+
+        escaped = !escaped && char === '\\';
+        continue;
+      }
+
+      if (inDoubleQuote) {
+        if (!escaped && char === '"') {
+          inDoubleQuote = false;
+        }
+
+        escaped = !escaped && char === '\\';
+        continue;
+      }
+
+      if (inTemplate) {
+        if (!escaped && char === '`') {
+          inTemplate = false;
+        }
+
+        escaped = !escaped && char === '\\';
+        continue;
+      }
+
+      escaped = false;
+
+      if (char === '/' && nextChar === '/') {
+        inLineComment = true;
+        continue;
+      }
+
+      if (char === '/' && nextChar === '*') {
+        inBlockComment = true;
+        column += 1;
+        continue;
+      }
+
+      if (char === "'") {
+        inSingleQuote = true;
+        continue;
+      }
+
+      if (char === '"') {
+        inDoubleQuote = true;
+        continue;
+      }
+
+      if (char === '`') {
+        inTemplate = true;
+        continue;
+      }
+
+      if (char === '(') {
+        parenDepth += 1;
+        continue;
+      }
+
+      if (char === ')') {
+        parenDepth = Math.max(0, parenDepth - 1);
+        continue;
+      }
+
+      if (char === '{') {
+        braceDepth += 1;
+        continue;
+      }
+
+      if (char === '}') {
+        braceDepth = Math.max(0, braceDepth - 1);
+        continue;
+      }
+
+      if (char === '[') {
+        bracketDepth += 1;
+        continue;
+      }
+
+      if (char === ']') {
+        bracketDepth = Math.max(0, bracketDepth - 1);
+        continue;
+      }
+
+      if (char === ';' && parenDepth === 0 && braceDepth === 0 && bracketDepth === 0) {
+        return lineIndex;
+      }
+    }
+  }
+
+  return lines.length - 1;
+}
+
 function transformAwaitLines(
   code: string,
   id: string,
@@ -28,15 +159,13 @@ function transformAwaitLines(
 
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
-    if (!/\bawait\b/.test(line)) {
+    const awaitIndex = findAwaitIndex(line);
+    if (awaitIndex === -1) {
       transformedLines.push(line);
       continue;
     }
 
-    let endIndex = index;
-    while (endIndex < lines.length - 1 && !/;\s*$/.test(lines[endIndex])) {
-      endIndex += 1;
-    }
+    const endIndex = findAwaitBlockEnd(lines, index, awaitIndex);
 
     const awaitBlock = lines.slice(index, endIndex + 1).join(lineBreak);
     const transformed = transformer(awaitBlock, id);

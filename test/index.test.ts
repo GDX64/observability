@@ -85,4 +85,38 @@ describe('asyncInstrument', () => {
       map: null
     });
   });
+
+  it('transforms await expressions with arrow callbacks that contain semicolons', async () => {
+    const plugin = asyncInstrument({
+      include: /\.ts$/,
+      transform: (code) => `// instrumented\n${code}\n// instrumented`
+    });
+
+    const tsCode = [
+      'const some = await hello(',
+      '  () => {',
+      '    const value = 1;',
+      '    return value;',
+      '  },',
+      ');'
+    ].join('\n');
+
+    const result = await plugin.transform.call({} as any, tsCode, '/project/file.ts');
+
+    const expectedResult = [
+      '// instrumented',
+      'const some = await hello(',
+      '  () => {',
+      '    const value = 1;',
+      '    return value;',
+      '  },',
+      ');',
+      '// instrumented'
+    ].join('\n');
+
+    expect(result).toEqual({
+      code: expectedResult,
+      map: null
+    });
+  });
 });
