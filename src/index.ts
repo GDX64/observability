@@ -26,20 +26,29 @@ function transformAwaitLines(
   const transformedLines: string[] = [];
   let changed = false;
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
     if (!/\bawait\b/.test(line)) {
       transformedLines.push(line);
       continue;
     }
 
-    const transformed = transformer(line, id);
-    if (typeof transformed !== 'string' || transformed === line) {
-      transformedLines.push(line);
+    let endIndex = index;
+    while (endIndex < lines.length - 1 && !/;\s*$/.test(lines[endIndex])) {
+      endIndex += 1;
+    }
+
+    const awaitBlock = lines.slice(index, endIndex + 1).join(lineBreak);
+    const transformed = transformer(awaitBlock, id);
+    if (typeof transformed !== 'string' || transformed === awaitBlock) {
+      transformedLines.push(...lines.slice(index, endIndex + 1));
+      index = endIndex;
       continue;
     }
 
     transformedLines.push(...transformed.split(/\r?\n/));
     changed = true;
+    index = endIndex;
   }
 
   return changed ? transformedLines.join(lineBreak) : null;
