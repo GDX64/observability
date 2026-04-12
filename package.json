@@ -20,14 +20,14 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "npm run build:types && vite build",
-    "build:types": "tsc -p tsconfig.build.json",
+    "build": "vite build",
     "dev": "vite build --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build",
+    "deploy": "npm run prepublishOnly && npm publish --access public"
   },
   "peerDependencies": {
     "vite": "^5.0.0 || ^6.0.0"
@@ -36,7 +36,8 @@
     "@types/node": "^22.14.0",
     "prettier": "^3.5.3",
     "typescript": "^5.8.3",
-    "vitest": "^3.1.1",
-    "vite": "^6.3.3"
+    "vite": "^6.3.3",
+    "vite-plugin-dts": "^4.5.4",
+    "vitest": "^3.1.1"
   }
 }
