@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     asyncInstrument({
       include: /\.tsx?$/,
-      transform: (code) => `// instrumented\n${code}\n// instrumented`
+      transform: (code) => `console.log('async will run');\n${code}\nconsole.log('async did run');`
     })
   ],
   resolve: {
