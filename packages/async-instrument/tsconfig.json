@@ -5,7 +5,6 @@
     "moduleResolution": "Bundler",
     "lib": ["ES2020"],
     "types": ["node", "vitest/globals"],
-    "noEmit": false,
     "declaration": true,
     "declarationMap": true,
     "outDir": "dist"
