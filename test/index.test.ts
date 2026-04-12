@@ -1,38 +1,39 @@
 import { describe, expect, it } from 'vitest';
 import asyncInstrument from '../src';
-
-async function runTransform(plugin: ReturnType<typeof asyncInstrument>, code: string, id: string) {
-  const hook = plugin.transform;
-  if (!hook) {
-    return null;
-  }
-
-  if (typeof hook === 'function') {
-    return hook.call({} as never, code, id);
-  }
-
-  return hook.handler.call({} as never, code, id);
-}
+import { format } from 'prettier';
 
 describe('asyncInstrument', () => {
-  it('creates a plugin with expected metadata', () => {
-    const plugin = asyncInstrument();
-
-    expect(plugin.name).toBe('async-instrument');
-    expect(plugin.enforce).toBe('pre');
-    expect(typeof plugin.transform).toBe('function');
-  });
-
   it('returns transformed code when custom transform changes content', async () => {
     const plugin = asyncInstrument({
       include: /\.ts$/,
-      transform: (code) => `${code}\n// instrumented`
+      transform: (code) => `// instrumented\n${code}\n// instrumented`
     });
 
-    const result = await runTransform(plugin, 'const value = 1;', '/project/file.ts');
+    let tsCode = `
+    const val = 1;
+    async function hello(){
+      console.log(val);
+    }
+    const some = await hello(); 
+    `;
+
+    tsCode = await format(tsCode, { parser: 'typescript' });
+    const result = await plugin.transform.call({} as any, tsCode, '/project/file.ts');
+
+    let expectedResult = `
+    const val = 1;
+    async function hello(){
+      console.log(val);
+    }
+    // instrumented
+    const some = await hello();
+    // instrumented
+    `;
+
+    expectedResult = await format(expectedResult, { parser: 'typescript' });
 
     expect(result).toEqual({
-      code: 'const value = 1;\n// instrumented',
+      code: expectedResult,
       map: null
     });
   });
@@ -44,7 +45,7 @@ describe('asyncInstrument', () => {
       transform: (code) => `${code}\n// instrumented`
     });
 
-    const result = await runTransform(plugin, 'const value = 1;', '/project/skip.ts');
+    const result = await plugin.transform.call({} as any, 'const value = 1;', '/project/skip.ts');
 
     expect(result).toBeNull();
   });

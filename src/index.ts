@@ -16,24 +16,49 @@ function shouldTransform(id: string, include: RegExp[], exclude: RegExp[]): bool
   return isIncluded && !isExcluded;
 }
 
-export function asyncInstrument(options: AsyncInstrumentOptions = {}): Plugin {
+function transformAwaitLines(
+  code: string,
+  id: string,
+  transformer: (code: string, id: string) => string
+): string | null {
+  const lineBreak = code.includes('\r\n') ? '\r\n' : '\n';
+  const lines = code.split(/\r?\n/);
+  const transformedLines: string[] = [];
+  let changed = false;
+
+  for (const line of lines) {
+    if (!/\bawait\b/.test(line)) {
+      transformedLines.push(line);
+      continue;
+    }
+
+    const transformed = transformer(line, id);
+    if (typeof transformed !== 'string' || transformed === line) {
+      transformedLines.push(line);
+      continue;
+    }
+
+    transformedLines.push(...transformed.split(/\r?\n/));
+    changed = true;
+  }
+
+  return changed ? transformedLines.join(lineBreak) : null;
+}
+
+export function asyncInstrument(options: AsyncInstrumentOptions) {
   const include = toArray(options.include);
   const exclude = toArray(options.exclude);
 
   return {
     name: 'async-instrument',
     enforce: 'pre',
-    async transform(code, id) {
+    transform(code, id) {
       if (!shouldTransform(id, include, exclude)) {
         return null;
       }
 
-      if (!options.transform) {
-        return null;
-      }
-
-      const transformed = await options.transform(code, id);
-      if (typeof transformed !== 'string' || transformed === code) {
+      const transformed = transformAwaitLines(code, id, options.transform);
+      if (!transformed) {
         return null;
       }
 
@@ -42,7 +67,7 @@ export function asyncInstrument(options: AsyncInstrumentOptions = {}): Plugin {
         map: null
       };
     }
-  };
+  } satisfies Plugin;
 }
 
 export type { AsyncInstrumentOptions };

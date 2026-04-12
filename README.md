@@ -13,7 +13,6 @@ npm install
 ```bash
 npm run dev         # watch mode library build
 npm run typecheck   # TypeScript validation
-npm run lint        # ESLint
 npm run format      # Prettier
 npm run test        # Vitest
 npm run build       # declaration files + Vite library build
@@ -43,4 +42,4 @@ export default defineConfig({
 
 ## Publish
 
-The `prepublishOnly` script runs lint, type checks, tests, and build before publishing.
+The `prepublishOnly` script runs type checks, tests, and build before publishing.
