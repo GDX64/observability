@@ -1,0 +1,44 @@
+{
+  "name": "@glmachado/async-instrument",
+  "version": "0.1.0",
+  "description": "A Vite plugin boilerplate for file transforms.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build",
+    "deploy": "npm run prepublishOnly && npm publish --access public"
+  },
+  "peerDependencies": {
+    "vite": "^5.0.0 || ^6.0.0",
+    "typescript": "^5.8.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.3",
+    "vite-plugin-dts": "^4.5.4",
+    "vitest": "^3.1.1"
+  }
+}
