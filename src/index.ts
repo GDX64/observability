@@ -1,4 +1,5 @@
 import type { Plugin } from 'vite';
+import ts from 'typescript';
 import type { AsyncInstrumentOptions } from './types';
 
 function toArray(pattern?: RegExp | RegExp[]): RegExp[] {
@@ -16,135 +17,67 @@ function shouldTransform(id: string, include: RegExp[], exclude: RegExp[]): bool
   return isIncluded && !isExcluded;
 }
 
-function findAwaitIndex(line: string): number {
-  const match = /\bawait\b/.exec(line);
-  return match ? match.index : -1;
+interface LineRange {
+  start: number;
+  end: number;
 }
 
-function findAwaitBlockEnd(lines: string[], startLine: number, startColumn: number): number {
-  let parenDepth = 0;
-  let braceDepth = 0;
-  let bracketDepth = 0;
-  let inSingleQuote = false;
-  let inDoubleQuote = false;
-  let inTemplate = false;
-  let inBlockComment = false;
-  let escaped = false;
-
-  for (let lineIndex = startLine; lineIndex < lines.length; lineIndex++) {
-    const line = lines[lineIndex];
-    let inLineComment = false;
-    const columnStart = lineIndex === startLine ? startColumn : 0;
-
-    for (let column = columnStart; column < line.length; column++) {
-      const char = line[column];
-      const nextChar = line[column + 1] ?? '';
-
-      if (inLineComment) {
-        break;
-      }
-
-      if (inBlockComment) {
-        if (char === '*' && nextChar === '/') {
-          inBlockComment = false;
-          column += 1;
-        }
-
-        continue;
-      }
-
-      if (inSingleQuote) {
-        if (!escaped && char === "'") {
-          inSingleQuote = false;
-        }
-
-        escaped = !escaped && char === '\\';
-        continue;
-      }
-
-      if (inDoubleQuote) {
-        if (!escaped && char === '"') {
-          inDoubleQuote = false;
-        }
-
-        escaped = !escaped && char === '\\';
-        continue;
-      }
-
-      if (inTemplate) {
-        if (!escaped && char === '`') {
-          inTemplate = false;
-        }
-
-        escaped = !escaped && char === '\\';
-        continue;
-      }
-
-      escaped = false;
-
-      if (char === '/' && nextChar === '/') {
-        inLineComment = true;
-        continue;
-      }
-
-      if (char === '/' && nextChar === '*') {
-        inBlockComment = true;
-        column += 1;
-        continue;
-      }
-
-      if (char === "'") {
-        inSingleQuote = true;
-        continue;
-      }
-
-      if (char === '"') {
-        inDoubleQuote = true;
-        continue;
-      }
-
-      if (char === '`') {
-        inTemplate = true;
-        continue;
-      }
-
-      if (char === '(') {
-        parenDepth += 1;
-        continue;
-      }
-
-      if (char === ')') {
-        parenDepth = Math.max(0, parenDepth - 1);
-        continue;
-      }
-
-      if (char === '{') {
-        braceDepth += 1;
-        continue;
-      }
-
-      if (char === '}') {
-        braceDepth = Math.max(0, braceDepth - 1);
-        continue;
-      }
-
-      if (char === '[') {
-        bracketDepth += 1;
-        continue;
-      }
-
-      if (char === ']') {
-        bracketDepth = Math.max(0, bracketDepth - 1);
-        continue;
-      }
-
-      if (char === ';' && parenDepth === 0 && braceDepth === 0 && bracketDepth === 0) {
-        return lineIndex;
-      }
+function findEnclosingStatement(node: ts.Node): ts.Statement | null {
+  let current: ts.Node | undefined = node;
+  while (current && !ts.isSourceFile(current)) {
+    if (ts.isStatement(current)) {
+      return current;
     }
+
+    current = current.parent;
   }
 
-  return lines.length - 1;
+  return null;
+}
+
+function collectAwaitStatementRanges(code: string): LineRange[] {
+  const sourceFile = ts.createSourceFile(
+    'inline.ts',
+    code,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS
+  );
+  const ranges: LineRange[] = [];
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isAwaitExpression(node)) {
+      const statement = findEnclosingStatement(node);
+      if (statement) {
+        const start = sourceFile.getLineAndCharacterOfPosition(statement.getStart(sourceFile)).line;
+        const end = sourceFile.getLineAndCharacterOfPosition(statement.getEnd()).line;
+        ranges.push({ start, end });
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+
+  if (ranges.length === 0) {
+    return ranges;
+  }
+
+  ranges.sort((left, right) => left.start - right.start || left.end - right.end);
+
+  const merged: LineRange[] = [];
+  for (const range of ranges) {
+    const last = merged[merged.length - 1];
+    if (!last || range.start > last.end) {
+      merged.push({ ...range });
+      continue;
+    }
+
+    last.end = Math.max(last.end, range.end);
+  }
+
+  return merged;
 }
 
 function transformAwaitLines(
@@ -154,30 +87,35 @@ function transformAwaitLines(
 ): string | null {
   const lineBreak = code.includes('\r\n') ? '\r\n' : '\n';
   const lines = code.split(/\r?\n/);
+  const ranges = collectAwaitStatementRanges(code);
   const transformedLines: string[] = [];
   let changed = false;
+  let rangeIndex = 0;
 
   for (let index = 0; index < lines.length; index++) {
-    const line = lines[index];
-    const awaitIndex = findAwaitIndex(line);
-    if (awaitIndex === -1) {
-      transformedLines.push(line);
+    while (rangeIndex < ranges.length && ranges[rangeIndex].end < index) {
+      rangeIndex += 1;
+    }
+
+    const range = ranges[rangeIndex];
+    if (!range || range.start !== index) {
+      transformedLines.push(lines[index]);
       continue;
     }
 
-    const endIndex = findAwaitBlockEnd(lines, index, awaitIndex);
-
-    const awaitBlock = lines.slice(index, endIndex + 1).join(lineBreak);
+    const awaitBlock = lines.slice(range.start, range.end + 1).join(lineBreak);
     const transformed = transformer(awaitBlock, id);
     if (typeof transformed !== 'string' || transformed === awaitBlock) {
-      transformedLines.push(...lines.slice(index, endIndex + 1));
-      index = endIndex;
+      transformedLines.push(...lines.slice(range.start, range.end + 1));
+      index = range.end;
+      rangeIndex += 1;
       continue;
     }
 
     transformedLines.push(...transformed.split(/\r?\n/));
     changed = true;
-    index = endIndex;
+    index = range.end;
+    rangeIndex += 1;
   }
 
   return changed ? transformedLines.join(lineBreak) : null;
