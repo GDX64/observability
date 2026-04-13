@@ -1,70 +1,10 @@
-import { useState, useEffect } from 'react';
 import { Button } from './components/ui/button';
 import { Input } from './components/ui/input';
 import { Checkbox } from './components/ui/checkbox';
-import { db, Todo } from './db';
-import { logger } from '@glmachado/logger';
+import { useAppState } from './hooks/useAppState';
 
 function App() {
-  const [todos, setTodos] = useState<Todo[]>([]);
-  const [newTodo, setNewTodo] = useState('');
-
-  useEffect(() => {
-    loadTodos();
-  }, []);
-
-  const loadTodos = async () => {
-    using _span = logger.span('load-todos');
-    logger.info('Loading todos');
-    try {
-      const allTodos = await db.todos.toArray();
-      setTodos(allTodos);
-      logger.info('Todos loaded successfully');
-    } catch (error) {
-      logger.error(`Failed to load todos: ${error}`);
-    }
-  };
-
-  const addTodo = async () => {
-    if (newTodo.trim()) {
-      logger.info('Adding new todo');
-      try {
-        await db.todos.add({ text: newTodo, completed: false });
-        setNewTodo('');
-        loadTodos();
-        logger.info('Todo added successfully');
-      } catch (error) {
-        logger.error(`Failed to add todo: ${error}`);
-      }
-    }
-  };
-
-  const toggleTodo = async (id: number) => {
-    logger.info('Toggling todo');
-    try {
-      await db.todos
-        .where('id')
-        .equals(id)
-        .modify((todo) => {
-          todo.completed = !todo.completed;
-        });
-      loadTodos();
-      logger.info('Todo toggled successfully');
-    } catch (error) {
-      logger.error(`Failed to toggle todo: ${error}`);
-    }
-  };
-
-  const deleteTodo = async (id: number) => {
-    logger.info('Deleting todo');
-    try {
-      await db.todos.delete(id);
-      loadTodos();
-      logger.info('Todo deleted successfully');
-    } catch (error) {
-      logger.error(`Failed to delete todo: ${error}`);
-    }
-  };
+  const { todos, newTodo, setNewTodo, addTodo, toggleTodo, deleteTodo } = useAppState();
 
   return (
     <div className="min-h-screen bg-gray-100 p-4">
