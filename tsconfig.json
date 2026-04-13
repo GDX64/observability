@@ -5,6 +5,9 @@
       "path": "./packages/async-instrument"
     },
     {
+      "path": "./packages/logger"
+    },
+    {
       "path": "./apps/test-app"
     }
   ]
