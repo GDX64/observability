@@ -19,15 +19,17 @@ describe('Logger', () => {
   test('log with span', () => {
     const logger = new Logger();
     const logsArr = collectLogs(logger);
-    // span must support the using interface
-    const span = logger.span('test-span');
+    function testSpan() {
+      // span must support the using interface
+      using span = logger.span('test-span');
 
-    //when created the span becomes active
-    //so we dont need to pass it explicitly
-    logger.info('This is a log with a span');
+      //when created the span becomes active
+      //so we dont need to pass it explicitly
+      logger.info('This is a log with a span');
+      return span;
+    }
 
-    // Explicitly dispose to ensure SPAN_END is emitted
-    span[Symbol.dispose]();
+    const span = testSpan();
 
     expect(logsArr).toEqual([
       Logger.log({
@@ -44,6 +46,62 @@ describe('Logger', () => {
         message: 'test-span',
         level: LogLevel.SPAN_END,
         span: span.id
+      })
+    ]);
+  });
+
+  test('nested spans', () => {
+    const logger = new Logger();
+    const logsArr = collectLogs(logger);
+
+    function testNestedSpans() {
+      using parentSpan = logger.span('parent-operation');
+      logger.info('Starting parent operation');
+
+      using childSpan = logger.span('child-operation');
+      logger.info('Processing child operation');
+
+      return { parentSpan, childSpan };
+    }
+
+    const { parentSpan, childSpan } = testNestedSpans();
+
+    expect(logsArr).toEqual([
+      // Parent span starts
+      Logger.log({
+        message: 'parent-operation',
+        level: LogLevel.SPAN_START,
+        span: parentSpan.id
+      }),
+      // Parent operation log
+      Logger.log({
+        message: 'Starting parent operation',
+        level: LogLevel.INFO,
+        span: parentSpan.id
+      }),
+      // Child span starts
+      Logger.log({
+        message: 'child-operation',
+        level: LogLevel.SPAN_START,
+        span: `${parentSpan.id}/${childSpan.id}`
+      }),
+      // Child operation log
+      Logger.log({
+        message: 'Processing child operation',
+        level: LogLevel.INFO,
+        span: `${parentSpan.id}/${childSpan.id}`
+      }),
+      // Child span ends
+      Logger.log({
+        message: 'child-operation',
+        level: LogLevel.SPAN_END,
+        span: `${parentSpan.id}/${childSpan.id}`
+      }),
+      // Parent span ends
+      Logger.log({
+        message: 'parent-operation',
+        level: LogLevel.SPAN_END,
+        span: parentSpan.id
       })
     ]);
   });

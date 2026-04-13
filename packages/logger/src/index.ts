@@ -30,6 +30,7 @@ export class Logger {
   private subscribers: Array<(log: Log) => void> = [];
   private activeSpan: Span | null = null;
   private spanStack: Span[] = [];
+  private static spanCounter = 0;
 
   constructor(options: LoggerOptions = {}) {
     this.level = options.level ?? LogLevel.INFO;
@@ -53,20 +54,28 @@ export class Logger {
   }
 
   private getCurrentSpanId(): string | null {
-    return this.activeSpan?.id ?? null;
+    if (!this.activeSpan) return null;
+    // Build the full path by walking up the stack
+    const path: string[] = [];
+    for (let i = 0; i < this.spanStack.length; i++) {
+      path.push(this.spanStack[i].id);
+    }
+    return path.join('/');
   }
 
   span(name: string): Span & Disposable {
-    const spanId = `${name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const baseSpanId = (++Logger.spanCounter).toString();
+    const parentSpanId = this.getCurrentSpanId();
+    const fullSpanId = parentSpanId ? `${parentSpanId}/${baseSpanId}` : baseSpanId;
     const span: Span & Disposable = {
-      id: spanId,
+      id: baseSpanId,
       name,
       [Symbol.dispose]: () => {
         // Emit span end
         const endLog = Logger.log({
           message: name,
           level: LogLevel.SPAN_END,
-          span: spanId
+          span: fullSpanId
         });
         this.emit(endLog);
 
@@ -84,7 +93,7 @@ export class Logger {
     const startLog = Logger.log({
       message: name,
       level: LogLevel.SPAN_START,
-      span: spanId
+      span: fullSpanId
     });
     this.emit(startLog);
 
