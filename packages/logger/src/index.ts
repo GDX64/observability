@@ -28,7 +28,6 @@ export class Logger {
   private level: LogLevel;
   private prefix: string;
   private subscribers: Array<(log: Log) => void> = [];
-  private activeSpan: Span | null = null;
   private spanStack: Span[] = [];
   private static spanCounter = 0;
 
@@ -54,7 +53,7 @@ export class Logger {
   }
 
   private getCurrentSpanId(): string | null {
-    if (!this.activeSpan) return null;
+    if (!this.currentSpan) return null;
     // Build the full path by walking up the stack
     const path: string[] = [];
     for (let i = 0; i < this.spanStack.length; i++) {
@@ -81,13 +80,11 @@ export class Logger {
 
         // Pop from stack
         this.spanStack.pop();
-        this.activeSpan = this.spanStack[this.spanStack.length - 1] || null;
       }
     };
 
-    // Push to stack and set as active
+    // Push to stack
     this.spanStack.push(span);
-    this.activeSpan = span;
 
     // Emit span start
     const startLog = Logger.log({
@@ -100,21 +97,19 @@ export class Logger {
     return span;
   }
 
-  currentSpan(): Span | null {
-    return this.activeSpan;
+  get currentSpan(): Span | null {
+    return this.spanStack[this.spanStack.length - 1] || null;
   }
 
-  resume(span: Span): void {
-    this.activeSpan = span;
+  resume(span: Span | null): void {
     // Ensure the span is in the stack
-    if (!this.spanStack.includes(span)) {
+    if (span && !this.spanStack.includes(span)) {
       this.spanStack.push(span);
     }
   }
 
   popSpan(): Span | null {
     const popped = this.spanStack.pop();
-    this.activeSpan = this.spanStack[this.spanStack.length - 1] || null;
     return popped || null;
   }
 
