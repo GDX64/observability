@@ -100,6 +100,24 @@ export class Logger {
     return span;
   }
 
+  currentSpan(): Span | null {
+    return this.activeSpan;
+  }
+
+  resume(span: Span): void {
+    this.activeSpan = span;
+    // Ensure the span is in the stack
+    if (!this.spanStack.includes(span)) {
+      this.spanStack.push(span);
+    }
+  }
+
+  popSpan(): Span | null {
+    const popped = this.spanStack.pop();
+    this.activeSpan = this.spanStack[this.spanStack.length - 1] || null;
+    return popped || null;
+  }
+
   subscribe(callback: (log: Log) => void): () => void {
     this.subscribers.push(callback);
     return () => {

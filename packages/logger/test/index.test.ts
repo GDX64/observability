@@ -105,6 +105,60 @@ describe('Logger', () => {
       })
     ]);
   });
+
+  test('async spans', async () => {
+    const logger = new Logger();
+    const logsArr = collectLogs(logger);
+
+    async function testAsyncSpan() {
+      using span = logger.span('async-operation');
+      await nestedAsyncFunction();
+      return span;
+    }
+
+    async function nestedAsyncFunction() {
+      // Simulate async work
+      logger.info('Starting async operation');
+      queueMicrotask(() => {
+        logger.info('log with no span');
+      });
+      const current = logger.popSpan()!;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      logger.resume(current);
+
+      logger.info('Async operation completed');
+    }
+
+    const span = await testAsyncSpan();
+
+    expect(logsArr).toEqual([
+      Logger.log({
+        message: 'async-operation',
+        level: LogLevel.SPAN_START,
+        span: span.id
+      }),
+      Logger.log({
+        message: 'Starting async operation',
+        level: LogLevel.INFO,
+        span: span.id
+      }),
+      Logger.log({
+        message: 'log with no span',
+        level: LogLevel.INFO,
+        span: null
+      }),
+      Logger.log({
+        message: 'Async operation completed',
+        level: LogLevel.INFO,
+        span: span.id
+      }),
+      Logger.log({
+        message: 'async-operation',
+        level: LogLevel.SPAN_END,
+        span: span.id
+      })
+    ]);
+  });
 });
 
 function collectLogs(logger: Logger): Log[] {
