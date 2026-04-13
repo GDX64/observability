@@ -14,9 +14,23 @@ export interface Log {
   span: string | null;
 }
 
-export interface Span {
-  id: string;
-  name: string;
+export class Span implements Disposable {
+  constructor(
+    private logger: Logger,
+    public id: string,
+    public name: string,
+    public fullSpanId: string
+  ) {}
+
+  [Symbol.dispose](): void {
+    const endLog = Logger.log({
+      message: this.name,
+      level: LogLevel.SPAN_END,
+      span: this.fullSpanId
+    });
+    this.logger.emit(endLog);
+    this.logger.spanStack.pop();
+  }
 }
 
 export interface LoggerOptions {
@@ -28,7 +42,7 @@ export class Logger {
   private level: LogLevel;
   private prefix: string;
   private subscribers: Array<(log: Log) => void> = [];
-  private spanStack: Span[] = [];
+  spanStack: Span[] = [];
   private static spanCounter = 0;
 
   constructor(options: LoggerOptions = {}) {
@@ -48,40 +62,19 @@ export class Logger {
     return level >= this.level;
   }
 
-  private emit(log: Log): void {
+  emit(log: Log): void {
     this.subscribers.forEach((callback) => callback(log));
   }
 
   private getCurrentSpanId(): string | null {
-    if (!this.currentSpan) return null;
-    // Build the full path by walking up the stack
-    const path: string[] = [];
-    for (let i = 0; i < this.spanStack.length; i++) {
-      path.push(this.spanStack[i].id);
-    }
-    return path.join('/');
+    return this.currentSpan?.fullSpanId || null;
   }
 
-  span(name: string): Span & Disposable {
+  span(name: string): Span {
     const baseSpanId = (++Logger.spanCounter).toString();
     const parentSpanId = this.getCurrentSpanId();
     const fullSpanId = parentSpanId ? `${parentSpanId}/${baseSpanId}` : baseSpanId;
-    const span: Span & Disposable = {
-      id: baseSpanId,
-      name,
-      [Symbol.dispose]: () => {
-        // Emit span end
-        const endLog = Logger.log({
-          message: name,
-          level: LogLevel.SPAN_END,
-          span: fullSpanId
-        });
-        this.emit(endLog);
-
-        // Pop from stack
-        this.spanStack.pop();
-      }
-    };
+    const span = new Span(this, baseSpanId, name, fullSpanId);
 
     // Push to stack
     this.spanStack.push(span);
