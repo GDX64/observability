@@ -31,6 +31,10 @@ export class Span implements Disposable {
     this.logger.emit(endLog);
     this.logger.spanStack.pop();
   }
+
+  resume(): void {
+    this.logger.resume(this);
+  }
 }
 
 export interface LoggerOptions {
@@ -175,4 +179,31 @@ export const logger = new Logger();
 // Factory function for creating loggers
 export function createLogger(options?: LoggerOptions): Logger {
   return new Logger(options);
+}
+
+let currentContext: AsyncContext | null = null;
+
+function getAsyncContext() {
+  return currentContext;
+}
+
+declare const self: any;
+self.getAsyncContext = getAsyncContext;
+
+class AsyncContext implements Disposable {
+  constructor(public span: Span) {}
+
+  static create(span: Span): AsyncContext {
+    const context = new AsyncContext(span);
+    currentContext = context;
+    return context;
+  }
+
+  resume() {
+    this.span.resume();
+  }
+
+  [Symbol.dispose](): void {
+    currentContext = null;
+  }
 }
