@@ -20,32 +20,28 @@ describe('asyncInstrument', () => {
     `;
     const expected = `
     async function foo(){
-      using context = getAsyncContext();
-      let running;
-      const result = (running = doSomething(), context?.pause(), await running);
-      context?.resume();
+      using __context = AsyncContext.getCurrent();
+      const result = await AsyncContext.operation(doSomething());
+      __context?.resume();
       const result2 = 
-        (running = doSomethingElse(), context?.pause(), await running);
-      context?.resume();
-      const result3 = (running = chained
+        await AsyncContext.operation(doSomethingElse());
+      __context?.resume();
+      const result3 = await AsyncContext.operation(chained
         .foo()
-        .bar(), context?.pause(), await running);
-      context?.resume();
-      const nested = (running = (async ()=>{
-        using context = getAsyncContext();
-        let running;
-        const result4 = (running = doSomethingNested(), context?.pause(), await running);
-        context?.resume();
+        .bar());
+      __context?.resume();
+      const nested = await AsyncContext.operation((async ()=>{
+        using __context = AsyncContext.getCurrent();
+        const result4 = await AsyncContext.operation(doSomethingNested());
+        __context?.resume();
         return result4;
-      })(), context?.pause(), await running);
-      context?.resume();
+      })());
+      __context?.resume();
       return result2;
     }
     `;
     const transformed = await transform({
-      code,
-      contextName: 'context',
-      getFunctionName: 'getAsyncContext'
+      code
     });
     expect(transformed).toBe(expected);
   });

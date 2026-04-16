@@ -5,6 +5,7 @@ export interface TransformOptions {
   code: string;
   contextName?: string;
   getFunctionName?: string;
+  operationFunctionName?: string;
 }
 
 function findEnclosingStatement(node: ts.Node): ts.Statement | null {
@@ -74,7 +75,12 @@ function findNearestAsyncFunction(node: ts.Node): FunctionLikeWithBody | null {
   return null;
 }
 
-function instrumentAsyncAwait(code: string, contextName: string, getFunctionName: string): string {
+function instrumentAsyncAwait(
+  code: string,
+  contextName: string,
+  getFunctionName: string,
+  operationFunctionName: string
+): string {
   const sourceFile = ts.createSourceFile(
     'inline.ts',
     code,
@@ -156,7 +162,6 @@ function instrumentAsyncAwait(code: string, contextName: string, getFunctionName
             contextInsertLine,
             `${contextIndentation}using ${contextName} = ${getFunctionName}();`
           );
-          addBeforeLine(contextInsertLine, `${contextIndentation}let running;`);
         }
       }
     }
@@ -239,7 +244,7 @@ function instrumentAsyncAwait(code: string, contextName: string, getFunctionName
         nestedAwaits
       );
 
-      output += `(running = ${renderedExpression}, ${contextName}?.pause(), await running)`;
+      output += `await ${operationFunctionName}(${renderedExpression})`;
       cursor = awaitEnd;
     }
 
@@ -270,15 +275,17 @@ function instrumentAsyncAwait(code: string, contextName: string, getFunctionName
 }
 
 export async function transform(options: TransformOptions): Promise<string> {
-  const contextName = options.contextName ?? 'context';
-  const getFunctionName = options.getFunctionName ?? 'getAsyncContext';
+  const contextName = options.contextName ?? '__context';
+  const getFunctionName = options.getFunctionName ?? 'AsyncContext.getCurrent';
+  const operationFunctionName = options.operationFunctionName ?? 'AsyncContext.operation';
 
-  return instrumentAsyncAwait(options.code, contextName, getFunctionName);
+  return instrumentAsyncAwait(options.code, contextName, getFunctionName, operationFunctionName);
 }
 
 export function asyncInstrumentPlugin(args: {
   contextName: string;
   getFunctionName: string;
+  operationFunctionName?: string;
 }): Plugin {
   return {
     name: 'vite-plugin-async-instrument',
@@ -287,6 +294,7 @@ export function asyncInstrumentPlugin(args: {
         return transform({
           contextName: args.contextName,
           getFunctionName: args.getFunctionName,
+          operationFunctionName: args.operationFunctionName,
           code
         });
       }

@@ -95,7 +95,7 @@ export class Logger {
   }
 
   get currentSpan(): Span | null {
-    const context = getAsyncContext();
+    const context = AsyncContext.getCurrent();
     if (context) {
       return context.span;
     }
@@ -187,18 +187,6 @@ export function createLogger(options?: LoggerOptions): Logger {
 
 let currentContext: AsyncContext | null = null;
 
-function getAsyncContext() {
-  return currentContext;
-}
-
-declare const self: any;
-if (typeof self !== 'undefined') {
-  self.getAsyncContext = getAsyncContext;
-}
-if (typeof globalThis !== 'undefined') {
-  (globalThis as any).getAsyncContext = getAsyncContext;
-}
-
 export class AsyncContext implements Disposable {
   parentContext: AsyncContext | null = null;
   constructor(public span: Span) {
@@ -218,6 +206,19 @@ export class AsyncContext implements Disposable {
     });
   }
 
+  static operation(p: Promise<unknown>): Promise<unknown> {
+    const context = AsyncContext.getCurrent();
+    p.then(() => {
+      context?.resume();
+    });
+    context?.pause();
+    return p;
+  }
+
+  static getCurrent(): AsyncContext | null {
+    return currentContext;
+  }
+
   resume() {
     currentContext = this;
   }
@@ -229,4 +230,12 @@ export class AsyncContext implements Disposable {
   [Symbol.dispose](): void {
     this.pause();
   }
+}
+
+declare const self: any;
+if (typeof self !== 'undefined') {
+  self.AsyncContext = AsyncContext;
+}
+if (typeof globalThis !== 'undefined') {
+  (globalThis as any).AsyncContext = AsyncContext;
 }
