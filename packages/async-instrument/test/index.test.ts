@@ -21,29 +21,31 @@ describe('asyncInstrument', () => {
     const expected = `
     async function foo(){
       using context = getAsyncContext();
-      const result = await doSomething();
-      context.resume();
+      let running;
+      const result = (running = doSomething(), context?.pause(), await running);
+      context?.resume();
       const result2 = 
-        await doSomethingElse();
-      context.resume();
-      const result3 = await chained
+        (running = doSomethingElse(), context?.pause(), await running);
+      context?.resume();
+      const result3 = (running = chained
         .foo()
-        .bar();
-      context.resume();
-      const nested = await (async ()=>{
+        .bar(), context?.pause(), await running);
+      context?.resume();
+      const nested = (running = (async ()=>{
         using context = getAsyncContext();
-        const result4 = await doSomethingNested();
-        context.resume();
+        let running;
+        const result4 = (running = doSomethingNested(), context?.pause(), await running);
+        context?.resume();
         return result4;
-      })();
-      context.resume();
+      })(), context?.pause(), await running);
+      context?.resume();
       return result2;
     }
     `;
     const transformed = await transform({
       code,
       contextName: 'context',
-      getFunctionName: 'getAsyncContext',
+      getFunctionName: 'getAsyncContext'
     });
     expect(transformed).toBe(expected);
   });

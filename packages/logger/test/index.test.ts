@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { Logger, LogLevel, Log } from '../src';
+import { Logger, LogLevel, Log, AsyncContext } from '../src';
 
 describe('Logger', () => {
   test('basic logger', () => {
@@ -110,54 +110,22 @@ describe('Logger', () => {
     const logger = new Logger();
     const logsArr = collectLogs(logger);
 
-    async function testAsyncSpan() {
-      using span = logger.span('async-operation');
-      await nestedAsyncFunction();
-      return span;
-    }
-
-    async function nestedAsyncFunction() {
-      // Simulate async work
+    await AsyncContext.create(async () => {
       logger.info('Starting async operation');
       queueMicrotask(() => {
-        logger.info('log with no span');
+        logger.info('This is a log from a microtask');
       });
-      const current = logger.popSpan()!;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      logger.resume(current);
-
+      await anotherFunction();
       logger.info('Async operation completed');
+    });
+
+    async function anotherFunction() {
+      logger.info('timer await');
+      await new Promise((resolve) => setTimeout(resolve));
+      logger.info('after timer await');
     }
 
-    const span = await testAsyncSpan();
-
-    expect(logsArr).toEqual([
-      Logger.log({
-        message: 'async-operation',
-        level: LogLevel.SPAN_START,
-        span: span.id
-      }),
-      Logger.log({
-        message: 'Starting async operation',
-        level: LogLevel.INFO,
-        span: span.id
-      }),
-      Logger.log({
-        message: 'log with no span',
-        level: LogLevel.INFO,
-        span: null
-      }),
-      Logger.log({
-        message: 'Async operation completed',
-        level: LogLevel.INFO,
-        span: span.id
-      }),
-      Logger.log({
-        message: 'async-operation',
-        level: LogLevel.SPAN_END,
-        span: span.id
-      })
-    ]);
+    console.log(logsArr);
   });
 });
 

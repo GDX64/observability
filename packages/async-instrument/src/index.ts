@@ -90,6 +90,7 @@ function instrumentAsyncAwait(code: string, contextName: string, getFunctionName
   const afterLineInsertions = new Map<number, string[]>();
   const instrumentedFunctionLines = new Set<number>();
   const resumedStatementLines = new Set<number>();
+  const instrumentedAwaits: ts.AwaitExpression[] = [];
 
   const addBeforeLine = (lineIndex: number, content: string) => {
     const existing = beforeLineInsertions.get(lineIndex);
@@ -117,6 +118,8 @@ function instrumentAsyncAwait(code: string, contextName: string, getFunctionName
       const asyncFunction = findNearestAsyncFunction(node);
 
       if (statement && asyncFunction && asyncFunction.body && ts.isBlock(asyncFunction.body)) {
+        instrumentedAwaits.push(node);
+
         const statementStart = sourceFile.getLineAndCharacterOfPosition(
           statement.getStart(sourceFile)
         ).line;
@@ -125,7 +128,7 @@ function instrumentAsyncAwait(code: string, contextName: string, getFunctionName
         if (!resumedStatementLines.has(statementEnd)) {
           resumedStatementLines.add(statementEnd);
           const statementIndent = getIndentation(lines[statementStart] ?? '');
-          addAfterLine(statementEnd, `${statementIndent}${contextName}.resume();`);
+          addAfterLine(statementEnd, `${statementIndent}${contextName}?.resume();`);
         }
 
         const functionBody = asyncFunction.body;
@@ -153,6 +156,7 @@ function instrumentAsyncAwait(code: string, contextName: string, getFunctionName
             contextInsertLine,
             `${contextIndentation}using ${contextName} = ${getFunctionName}();`
           );
+          addBeforeLine(contextInsertLine, `${contextIndentation}let running;`);
         }
       }
     }
@@ -162,19 +166,99 @@ function instrumentAsyncAwait(code: string, contextName: string, getFunctionName
 
   visit(sourceFile);
 
-  if (beforeLineInsertions.size === 0 && afterLineInsertions.size === 0) {
+  if (
+    beforeLineInsertions.size === 0 &&
+    afterLineInsertions.size === 0 &&
+    instrumentedAwaits.length === 0
+  ) {
     return code;
   }
 
-  const transformedLines: string[] = [];
+  const awaitSet = new Set(instrumentedAwaits);
+  const awaitChildren = new Map<ts.AwaitExpression, ts.AwaitExpression[]>();
+  const topLevelAwaits: ts.AwaitExpression[] = [];
 
-  for (let index = 0; index < lines.length; index += 1) {
+  for (const awaitNode of instrumentedAwaits) {
+    let parentAwait: ts.AwaitExpression | null = null;
+    let current: ts.Node | undefined = awaitNode.parent;
+
+    while (current && !ts.isSourceFile(current)) {
+      if (ts.isAwaitExpression(current) && awaitSet.has(current)) {
+        parentAwait = current;
+        break;
+      }
+
+      current = current.parent;
+    }
+
+    if (parentAwait) {
+      const existingChildren = awaitChildren.get(parentAwait);
+      if (existingChildren) {
+        existingChildren.push(awaitNode);
+      } else {
+        awaitChildren.set(parentAwait, [awaitNode]);
+      }
+      continue;
+    }
+
+    topLevelAwaits.push(awaitNode);
+  }
+
+  const sortByStart = (nodes: ts.AwaitExpression[]) =>
+    nodes.sort((left, right) => left.getStart(sourceFile) - right.getStart(sourceFile));
+
+  sortByStart(topLevelAwaits);
+  for (const children of awaitChildren.values()) {
+    sortByStart(children);
+  }
+
+  const renderRangeWithAwaits = (
+    start: number,
+    end: number,
+    awaitNodes: ts.AwaitExpression[]
+  ): string => {
+    if (awaitNodes.length === 0) {
+      return code.slice(start, end);
+    }
+
+    let cursor = start;
+    let output = '';
+
+    for (const awaitNode of awaitNodes) {
+      const awaitStart = awaitNode.getStart(sourceFile);
+      const awaitEnd = awaitNode.getEnd();
+
+      output += code.slice(cursor, awaitStart);
+
+      const expressionStart = awaitNode.expression.getStart(sourceFile);
+      const expressionEnd = awaitNode.expression.getEnd();
+      const nestedAwaits = awaitChildren.get(awaitNode) ?? [];
+      const renderedExpression = renderRangeWithAwaits(
+        expressionStart,
+        expressionEnd,
+        nestedAwaits
+      );
+
+      output += `(running = ${renderedExpression}, ${contextName}?.pause(), await running)`;
+      cursor = awaitEnd;
+    }
+
+    output += code.slice(cursor, end);
+    return output;
+  };
+
+  const transformedCode = renderRangeWithAwaits(0, code.length, topLevelAwaits);
+
+  const transformedLines: string[] = [];
+  const transformedCodeLines = transformedCode.split(/\r?\n/);
+
+  for (let index = 0; index < transformedCodeLines.length; index += 1) {
     const before = beforeLineInsertions.get(index);
     if (before) {
       transformedLines.push(...before);
     }
 
-    transformedLines.push(lines[index]);
+    transformedLines.push(transformedCodeLines[index]);
 
     const after = afterLineInsertions.get(index);
     if (after) {
