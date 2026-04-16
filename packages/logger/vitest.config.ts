@@ -5,10 +5,5 @@ export default defineConfig({
     globals: true,
     environment: 'node'
   },
-  plugins: [
-    asyncInstrumentPlugin({
-      contextName: '__context__',
-      getFunctionName: 'getAsyncContext'
-    })
-  ]
+  plugins: [asyncInstrumentPlugin()]
 });

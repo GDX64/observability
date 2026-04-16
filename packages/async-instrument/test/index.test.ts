@@ -20,23 +20,16 @@ describe('asyncInstrument', () => {
     `;
     const expected = `
     async function foo(){
-      using __context = AsyncContext.getCurrent();
-      const result = await AsyncContext.operation(doSomething());
-      __context?.resume();
+      const result = await AsyncContext.operation(()=>doSomething());
       const result2 = 
-        await AsyncContext.operation(doSomethingElse());
-      __context?.resume();
-      const result3 = await AsyncContext.operation(chained
+        await AsyncContext.operation(()=>doSomethingElse());
+      const result3 = await AsyncContext.operation(()=>chained
         .foo()
         .bar());
-      __context?.resume();
-      const nested = await AsyncContext.operation((async ()=>{
-        using __context = AsyncContext.getCurrent();
-        const result4 = await AsyncContext.operation(doSomethingNested());
-        __context?.resume();
+      const nested = await AsyncContext.operation(()=>(async ()=>{
+        const result4 = await AsyncContext.operation(()=>doSomethingNested());
         return result4;
       })());
-      __context?.resume();
       return result2;
     }
     `;

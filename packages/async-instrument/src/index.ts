@@ -77,8 +77,8 @@ function findNearestAsyncFunction(node: ts.Node): FunctionLikeWithBody | null {
 
 function instrumentAsyncAwait(
   code: string,
-  contextName: string,
-  getFunctionName: string,
+  _contextName: string,
+  _getFunctionName: string,
   operationFunctionName: string
 ): string {
   const sourceFile = ts.createSourceFile(
@@ -88,81 +88,14 @@ function instrumentAsyncAwait(
     true,
     ts.ScriptKind.TS
   );
-  const lineBreak = code.includes('\r\n') ? '\r\n' : '\n';
-  const lines = code.split(/\r?\n/);
-  const indentUnit = detectIndentUnit(lines);
-
-  const beforeLineInsertions = new Map<number, string[]>();
-  const afterLineInsertions = new Map<number, string[]>();
-  const instrumentedFunctionLines = new Set<number>();
-  const resumedStatementLines = new Set<number>();
   const instrumentedAwaits: ts.AwaitExpression[] = [];
-
-  const addBeforeLine = (lineIndex: number, content: string) => {
-    const existing = beforeLineInsertions.get(lineIndex);
-    if (existing) {
-      existing.push(content);
-      return;
-    }
-
-    beforeLineInsertions.set(lineIndex, [content]);
-  };
-
-  const addAfterLine = (lineIndex: number, content: string) => {
-    const existing = afterLineInsertions.get(lineIndex);
-    if (existing) {
-      existing.push(content);
-      return;
-    }
-
-    afterLineInsertions.set(lineIndex, [content]);
-  };
 
   const visit = (node: ts.Node) => {
     if (ts.isAwaitExpression(node)) {
-      const statement = findEnclosingStatement(node);
       const asyncFunction = findNearestAsyncFunction(node);
 
-      if (statement && asyncFunction && asyncFunction.body && ts.isBlock(asyncFunction.body)) {
+      if (asyncFunction && asyncFunction.body && ts.isBlock(asyncFunction.body)) {
         instrumentedAwaits.push(node);
-
-        const statementStart = sourceFile.getLineAndCharacterOfPosition(
-          statement.getStart(sourceFile)
-        ).line;
-        const statementEnd = sourceFile.getLineAndCharacterOfPosition(statement.getEnd()).line;
-
-        if (!resumedStatementLines.has(statementEnd)) {
-          resumedStatementLines.add(statementEnd);
-          const statementIndent = getIndentation(lines[statementStart] ?? '');
-          addAfterLine(statementEnd, `${statementIndent}${contextName}?.resume();`);
-        }
-
-        const functionBody = asyncFunction.body;
-        let contextInsertLine: number;
-        let contextIndentation: string;
-
-        if (functionBody.statements.length > 0) {
-          const firstStatement = functionBody.statements[0];
-          contextInsertLine = sourceFile.getLineAndCharacterOfPosition(
-            firstStatement.getStart(sourceFile)
-          ).line;
-          contextIndentation = getIndentation(lines[contextInsertLine] ?? '');
-        } else {
-          contextInsertLine = sourceFile.getLineAndCharacterOfPosition(functionBody.getEnd()).line;
-          const bodyStartLine = sourceFile.getLineAndCharacterOfPosition(
-            functionBody.getStart(sourceFile)
-          ).line;
-          const bodyIndentation = getIndentation(lines[bodyStartLine] ?? '');
-          contextIndentation = `${bodyIndentation}${indentUnit}`;
-        }
-
-        if (!instrumentedFunctionLines.has(contextInsertLine)) {
-          instrumentedFunctionLines.add(contextInsertLine);
-          addBeforeLine(
-            contextInsertLine,
-            `${contextIndentation}using ${contextName} = ${getFunctionName}();`
-          );
-        }
       }
     }
 
@@ -171,11 +104,7 @@ function instrumentAsyncAwait(
 
   visit(sourceFile);
 
-  if (
-    beforeLineInsertions.size === 0 &&
-    afterLineInsertions.size === 0 &&
-    instrumentedAwaits.length === 0
-  ) {
+  if (instrumentedAwaits.length === 0) {
     return code;
   }
 
@@ -244,7 +173,7 @@ function instrumentAsyncAwait(
         nestedAwaits
       );
 
-      output += `await ${operationFunctionName}(${renderedExpression})`;
+      output += `await ${operationFunctionName}(()=>${renderedExpression})`;
       cursor = awaitEnd;
     }
 
@@ -254,24 +183,7 @@ function instrumentAsyncAwait(
 
   const transformedCode = renderRangeWithAwaits(0, code.length, topLevelAwaits);
 
-  const transformedLines: string[] = [];
-  const transformedCodeLines = transformedCode.split(/\r?\n/);
-
-  for (let index = 0; index < transformedCodeLines.length; index += 1) {
-    const before = beforeLineInsertions.get(index);
-    if (before) {
-      transformedLines.push(...before);
-    }
-
-    transformedLines.push(transformedCodeLines[index]);
-
-    const after = afterLineInsertions.get(index);
-    if (after) {
-      transformedLines.push(...after);
-    }
-  }
-
-  return transformedLines.join(lineBreak);
+  return transformedCode;
 }
 
 export async function transform(options: TransformOptions): Promise<string> {
@@ -282,19 +194,12 @@ export async function transform(options: TransformOptions): Promise<string> {
   return instrumentAsyncAwait(options.code, contextName, getFunctionName, operationFunctionName);
 }
 
-export function asyncInstrumentPlugin(args: {
-  contextName: string;
-  getFunctionName: string;
-  operationFunctionName?: string;
-}): Plugin {
+export function asyncInstrumentPlugin(): Plugin {
   return {
     name: 'vite-plugin-async-instrument',
     transform(code, id) {
       if (id.endsWith('.ts')) {
         return transform({
-          contextName: args.contextName,
-          getFunctionName: args.getFunctionName,
-          operationFunctionName: args.operationFunctionName,
           code
         });
       }

@@ -189,6 +189,7 @@ let currentContext: AsyncContext | null = null;
 
 export class AsyncContext implements Disposable {
   parentContext: AsyncContext | null = null;
+  isInAwaitedExpression = false;
   constructor(public span: Span) {
     if (currentContext) {
       this.parentContext = currentContext;
@@ -206,13 +207,14 @@ export class AsyncContext implements Disposable {
     });
   }
 
-  static operation(p: Promise<unknown>): Promise<unknown> {
+  static operation(p: () => Promise<unknown>): Promise<unknown> {
     const context = AsyncContext.getCurrent();
-    p.then(() => {
+    const result = p();
+    context?.pause();
+    result.then(() => {
       context?.resume();
     });
-    context?.pause();
-    return p;
+    return result;
   }
 
   static getCurrent(): AsyncContext | null {
