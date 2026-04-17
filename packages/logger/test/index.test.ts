@@ -129,14 +129,18 @@ describe('Logger', () => {
     }
 
     expect(logsArr).toEqual([
+      { message: 'async-operation', level: -2, span: '4' },
       { message: 'Starting async operation', level: 1, span: '4' },
       { message: 'timer await', level: 1, span: '4' },
+      { message: 'async-operation', level: -1, span: '4' },
       { message: 'This is a log from a microtask', level: 1, span: null },
+      { message: 'another-async-context', level: -2, span: '4/5' },
       {
         message: 'This is a log from another async context',
         level: 1,
         span: '4/5'
       },
+      { message: 'another-async-context', level: -1, span: '4/5' },
       { message: 'after timer await', level: 1, span: '4' },
       {
         message: 'Async operation completed with value: 10',

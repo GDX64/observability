@@ -85,7 +85,7 @@ export class Logger {
 
   async asyncSpan<T>(name: string, callback: () => Promise<T>): Promise<T> {
     const span = this.span(name);
-    const result = AsyncContext.create(callback);
+    const result = AsyncContext.create(span, callback);
     span[Symbol.dispose]();
     return result;
   }
@@ -206,7 +206,7 @@ let currentContext: AsyncContext | null = null;
 export class AsyncContext implements Disposable {
   parentContext: AsyncContext | null = null;
   isInAwaitedExpression = false;
-  constructor(public span: Span) {
+  constructor(public span: Span | null) {
     if (currentContext) {
       this.parentContext = currentContext;
     } else {
@@ -214,8 +214,7 @@ export class AsyncContext implements Disposable {
     }
   }
 
-  static create<T>(fn: () => Promise<T>): Promise<T> {
-    const span = logger.span('async-context');
+  static create<T>(span: Span | null, fn: () => Promise<T>): Promise<T> {
     const context = new AsyncContext(span);
     currentContext = context;
     return fn().finally(() => {
