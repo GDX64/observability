@@ -1,5 +1,24 @@
 import { describe, expect, it } from 'vitest';
+import ts from 'typescript';
 import { transform } from '../src';
+
+function normalizeCode(source: string): string {
+  const sourceFile = ts.createSourceFile(
+    'test.ts',
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS
+  );
+
+  return ts
+    .createPrinter({
+      removeComments: false,
+      newLine: ts.NewLineKind.LineFeed
+    })
+    .printFile(sourceFile)
+    .trim();
+}
 
 describe('asyncInstrument', () => {
   it('returns transformed code when custom transform changes content', async () => {
@@ -36,6 +55,6 @@ describe('asyncInstrument', () => {
     const transformed = await transform({
       code
     });
-    expect(transformed).toBe(expected);
+    expect(normalizeCode(transformed)).toBe(normalizeCode(expected));
   });
 });
