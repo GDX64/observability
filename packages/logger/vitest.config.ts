@@ -5,5 +5,9 @@ export default defineConfig({
     globals: true,
     environment: 'node'
   },
-  plugins: [asyncInstrumentPlugin()]
+  plugins: [
+    asyncInstrumentPlugin({
+      ignore: /node_modules|logger\.ts/
+    })
+  ]
 });

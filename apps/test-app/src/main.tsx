@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './style.css';
-import { logger } from '@glmachado/logger';
+import { logger } from '../../../packages/logger/dist/logger';
 
 (window as any).logger = logger;
 

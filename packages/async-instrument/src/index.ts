@@ -8,79 +8,151 @@ export interface TransformOptions {
   operationFunctionName?: string;
 }
 
-function findEnclosingStatement(node: ts.Node): ts.Statement | null {
-  let current: ts.Node | undefined = node;
-
-  while (current && !ts.isSourceFile(current)) {
-    if (ts.isStatement(current)) {
-      return current;
-    }
-
-    current = current.parent;
-  }
-
-  return null;
-}
-
-function getIndentation(line: string): string {
-  const matched = line.match(/^\s*/);
-  return matched?.[0] ?? '';
-}
-
-function detectIndentUnit(lines: string[]): string {
-  for (const line of lines) {
-    const matched = line.match(/^(\s+)\S/);
-    if (!matched) {
-      continue;
-    }
-
-    const indentation = matched[1];
-    if (indentation.includes('\t')) {
-      return '\t';
-    }
-
-    return ' '.repeat(Math.min(indentation.length, 2));
-  }
-
-  return '  ';
-}
-
-type FunctionLikeWithBody =
+type AsyncFunctionLikeWithBlock =
   | ts.FunctionDeclaration
   | ts.FunctionExpression
   | ts.ArrowFunction
   | ts.MethodDeclaration;
 
-function hasAsyncModifier(node: FunctionLikeWithBody): boolean {
-  return !!node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword);
+function hasAsyncModifier(node: ts.Node): boolean {
+  const modifiers = ts.canHaveModifiers(node) ? ts.getModifiers(node) : undefined;
+  return !!modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword);
 }
 
-function findNearestAsyncFunction(node: ts.Node): FunctionLikeWithBody | null {
-  let current: ts.Node | undefined = node.parent;
+function isFunctionLike(node: ts.Node): node is ts.FunctionLikeDeclaration {
+  return (
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node) ||
+    ts.isMethodDeclaration(node)
+  );
+}
 
-  while (current && !ts.isSourceFile(current)) {
-    if (
-      (ts.isFunctionDeclaration(current) ||
-        ts.isFunctionExpression(current) ||
-        ts.isArrowFunction(current) ||
-        ts.isMethodDeclaration(current)) &&
-      hasAsyncModifier(current)
-    ) {
-      return current;
+function isAsyncFunctionWithBlock(node: ts.Node): node is AsyncFunctionLikeWithBlock {
+  return isFunctionLike(node) && !!node.body && ts.isBlock(node.body) && hasAsyncModifier(node);
+}
+
+function hasAwaitInOwnBlock(block: ts.Block): boolean {
+  let found = false;
+
+  const visit = (node: ts.Node) => {
+    if (found) {
+      return;
     }
 
-    current = current.parent;
+    if (isFunctionLike(node)) {
+      return;
+    }
+
+    if (ts.isAwaitExpression(node)) {
+      found = true;
+      return;
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  for (const statement of block.statements) {
+    visit(statement);
+    if (found) {
+      break;
+    }
   }
 
-  return null;
+  return found;
 }
 
-function instrumentAsyncAwait(
-  code: string,
-  _contextName: string,
-  _getFunctionName: string,
-  operationFunctionName: string
-): string {
+function dottedNameToExpression(name: string): ts.Expression {
+  const parts = name.split('.').filter(Boolean);
+  if (parts.length === 0) {
+    return ts.factory.createIdentifier('AsyncContext.run');
+  }
+
+  let expression: ts.Expression = ts.factory.createIdentifier(parts[0]);
+  for (let index = 1; index < parts.length; index += 1) {
+    expression = ts.factory.createPropertyAccessExpression(expression, parts[index]);
+  }
+
+  return expression;
+}
+
+function updateFunctionBody(
+  node: AsyncFunctionLikeWithBlock,
+  body: ts.Block
+): AsyncFunctionLikeWithBlock {
+  if (ts.isFunctionDeclaration(node)) {
+    return ts.factory.updateFunctionDeclaration(
+      node,
+      node.modifiers,
+      node.asteriskToken,
+      node.name,
+      node.typeParameters,
+      node.parameters,
+      node.type,
+      body
+    );
+  }
+
+  if (ts.isFunctionExpression(node)) {
+    return ts.factory.updateFunctionExpression(
+      node,
+      node.modifiers,
+      node.asteriskToken,
+      node.name,
+      node.typeParameters,
+      node.parameters,
+      node.type,
+      body
+    );
+  }
+
+  if (ts.isArrowFunction(node)) {
+    return ts.factory.updateArrowFunction(
+      node,
+      node.modifiers,
+      node.typeParameters,
+      node.parameters,
+      node.type,
+      node.equalsGreaterThanToken,
+      body
+    );
+  }
+
+  return ts.factory.updateMethodDeclaration(
+    node,
+    node.modifiers,
+    node.asteriskToken,
+    node.name,
+    node.questionToken,
+    node.typeParameters,
+    node.parameters,
+    node.type,
+    body
+  );
+}
+
+function lowerAwaitToYield(block: ts.Block, context: ts.TransformationContext): ts.Block {
+  const lowerAwaitVisitor = (node: ts.Node): ts.Node => {
+    if (isFunctionLike(node)) {
+      return node;
+    }
+
+    if (ts.isAwaitExpression(node)) {
+      const expression = ts.visitNode(node.expression, lowerAwaitVisitor) as ts.Expression;
+      return ts.factory.createYieldExpression(undefined, expression);
+    }
+
+    return ts.visitEachChild(node, lowerAwaitVisitor, context);
+  };
+
+  const loweredStatements = block.statements.map(
+    (statement) => ts.visitNode(statement, lowerAwaitVisitor) as ts.Statement
+  );
+
+  return ts.factory.updateBlock(block, loweredStatements);
+}
+
+function instrumentAsyncAwait(code: string, runFunctionName: string): string {
   const sourceFile = ts.createSourceFile(
     'inline.ts',
     code,
@@ -88,116 +160,78 @@ function instrumentAsyncAwait(
     true,
     ts.ScriptKind.TS
   );
-  const instrumentedAwaits: ts.AwaitExpression[] = [];
 
-  const visit = (node: ts.Node) => {
-    if (ts.isAwaitExpression(node)) {
-      const asyncFunction = findNearestAsyncFunction(node);
-
-      if (asyncFunction && asyncFunction.body && ts.isBlock(asyncFunction.body)) {
-        instrumentedAwaits.push(node);
-      }
-    }
-
-    ts.forEachChild(node, visit);
-  };
-
-  visit(sourceFile);
-
-  if (instrumentedAwaits.length === 0) {
-    return code;
-  }
-
-  const awaitSet = new Set(instrumentedAwaits);
-  const awaitChildren = new Map<ts.AwaitExpression, ts.AwaitExpression[]>();
-  const topLevelAwaits: ts.AwaitExpression[] = [];
-
-  for (const awaitNode of instrumentedAwaits) {
-    let parentAwait: ts.AwaitExpression | null = null;
-    let current: ts.Node | undefined = awaitNode.parent;
-
-    while (current && !ts.isSourceFile(current)) {
-      if (ts.isAwaitExpression(current) && awaitSet.has(current)) {
-        parentAwait = current;
-        break;
+  const transformer: ts.TransformerFactory<ts.SourceFile> = (context) => {
+    const visitor: ts.Visitor = (node) => {
+      if (!isAsyncFunctionWithBlock(node)) {
+        return ts.visitEachChild(node, visitor, context);
       }
 
-      current = current.parent;
-    }
-
-    if (parentAwait) {
-      const existingChildren = awaitChildren.get(parentAwait);
-      if (existingChildren) {
-        existingChildren.push(awaitNode);
-      } else {
-        awaitChildren.set(parentAwait, [awaitNode]);
+      const transformedBody = ts.visitEachChild(node.body, visitor, context) as ts.Block;
+      if (!hasAwaitInOwnBlock(transformedBody)) {
+        return updateFunctionBody(node, transformedBody);
       }
-      continue;
-    }
 
-    topLevelAwaits.push(awaitNode);
-  }
-
-  const sortByStart = (nodes: ts.AwaitExpression[]) =>
-    nodes.sort((left, right) => left.getStart(sourceFile) - right.getStart(sourceFile));
-
-  sortByStart(topLevelAwaits);
-  for (const children of awaitChildren.values()) {
-    sortByStart(children);
-  }
-
-  const renderRangeWithAwaits = (
-    start: number,
-    end: number,
-    awaitNodes: ts.AwaitExpression[]
-  ): string => {
-    if (awaitNodes.length === 0) {
-      return code.slice(start, end);
-    }
-
-    let cursor = start;
-    let output = '';
-
-    for (const awaitNode of awaitNodes) {
-      const awaitStart = awaitNode.getStart(sourceFile);
-      const awaitEnd = awaitNode.getEnd();
-
-      output += code.slice(cursor, awaitStart);
-
-      const expressionStart = awaitNode.expression.getStart(sourceFile);
-      const expressionEnd = awaitNode.expression.getEnd();
-      const nestedAwaits = awaitChildren.get(awaitNode) ?? [];
-      const renderedExpression = renderRangeWithAwaits(
-        expressionStart,
-        expressionEnd,
-        nestedAwaits
+      const loweredBody = lowerAwaitToYield(transformedBody, context);
+      const generatorDeclaration = ts.factory.createFunctionDeclaration(
+        undefined,
+        ts.factory.createToken(ts.SyntaxKind.AsteriskToken),
+        '__genFn',
+        undefined,
+        [],
+        undefined,
+        loweredBody
       );
 
-      output += `await ${operationFunctionName}(()=>${renderedExpression})`;
-      cursor = awaitEnd;
-    }
+      const runExpression = dottedNameToExpression(runFunctionName);
+      const runCall = ts.factory.createReturnStatement(
+        ts.factory.createCallExpression(runExpression, undefined, [
+          ts.factory.createCallExpression(
+            ts.factory.createPropertyAccessExpression(
+              ts.factory.createIdentifier('__genFn'),
+              ts.factory.createIdentifier('call')
+            ),
+            undefined,
+            [ts.factory.createThis()]
+          )
+        ])
+      );
 
-    output += code.slice(cursor, end);
-    return output;
+      const instrumentedBody = ts.factory.updateBlock(transformedBody, [
+        generatorDeclaration,
+        runCall
+      ]);
+      return updateFunctionBody(node, instrumentedBody);
+    };
+
+    return (inputSourceFile) => ts.visitNode(inputSourceFile, visitor) as ts.SourceFile;
   };
 
-  const transformedCode = renderRangeWithAwaits(0, code.length, topLevelAwaits);
+  const transformed = ts.transform(sourceFile, [transformer]);
+  const transformedSourceFile = transformed.transformed[0];
+  transformed.dispose();
 
-  return transformedCode;
+  return ts
+    .createPrinter({
+      removeComments: false,
+      newLine: ts.NewLineKind.LineFeed
+    })
+    .printFile(transformedSourceFile);
 }
 
 export async function transform(options: TransformOptions): Promise<string> {
-  const contextName = options.contextName ?? '__context';
-  const getFunctionName = options.getFunctionName ?? 'AsyncContext.getCurrent';
-  const operationFunctionName = options.operationFunctionName ?? 'AsyncContext.operation';
+  const runFunctionName = options.operationFunctionName ?? 'AsyncContext.run';
 
-  return instrumentAsyncAwait(options.code, contextName, getFunctionName, operationFunctionName);
+  return instrumentAsyncAwait(options.code, runFunctionName);
 }
 
-export function asyncInstrumentPlugin(): Plugin {
+export function asyncInstrumentPlugin(args?: { ignore: RegExp }): Plugin {
   return {
     name: 'vite-plugin-async-instrument',
     transform(code, id) {
+      if (args?.ignore && args.ignore.test(id)) {
+        return null;
+      }
       if (id.endsWith('.ts')) {
         return transform({
           code

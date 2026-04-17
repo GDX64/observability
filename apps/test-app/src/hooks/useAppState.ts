@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db, Todo } from '../db';
-import { logger } from '@glmachado/logger';
+import { logger } from '../../../../packages/logger/dist/logger';
 
 export function useAppState() {
   const [todos, setTodos] = useState<Todo[]>([]);

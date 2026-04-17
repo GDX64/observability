@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { Logger, LogLevel, Log, AsyncContext } from '../src';
+import { Logger, LogLevel, Log, AsyncContext } from '../src/logger';
 
 describe('Logger', () => {
   test('basic logger', () => {
@@ -115,17 +115,36 @@ describe('Logger', () => {
       queueMicrotask(() => {
         logger.info('This is a log from a microtask');
       });
-      await anotherFunction();
-      logger.info('Async operation completed');
+      const value = await anotherFunction();
+      logger.info(`Async operation completed with value: ${value}`);
     });
 
     async function anotherFunction() {
       logger.info('timer await');
       await new Promise((resolve) => setTimeout(resolve));
+      await AsyncContext.create(async () => {
+        logger.info('This is a log from another async context');
+      });
       logger.info('after timer await');
+      return 10;
     }
 
-    console.log(logsArr);
+    expect(logsArr).toEqual([
+      { message: 'Starting async operation', level: 1, span: '4' },
+      { message: 'timer await', level: 1, span: '4' },
+      { message: 'This is a log from a microtask', level: 1, span: null },
+      {
+        message: 'This is a log from another async context',
+        level: 1,
+        span: '4/5'
+      },
+      { message: 'after timer await', level: 1, span: '4' },
+      {
+        message: 'Async operation completed with value: 10',
+        level: 1,
+        span: '4'
+      }
+    ]);
   });
 });
 

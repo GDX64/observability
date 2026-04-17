@@ -39,17 +39,23 @@ describe('asyncInstrument', () => {
     `;
     const expected = `
     async function foo(){
-      const result = await AsyncContext.operation(()=>doSomething());
-      const result2 = 
-        await AsyncContext.operation(()=>doSomethingElse());
-      const result3 = await AsyncContext.operation(()=>chained
-        .foo()
-        .bar());
-      const nested = await AsyncContext.operation(()=>(async ()=>{
-        const result4 = await AsyncContext.operation(()=>doSomethingNested());
-        return result4;
-      })());
-      return result2;
+      function* __genFn(){
+        const result = yield doSomething();
+        const result2 = 
+          yield doSomethingElse();
+        const result3 = yield chained
+          .foo()
+          .bar();
+        const nested = yield (async ()=>{
+          function* __genFn(){
+              const result4 = yield doSomethingNested();
+              return result4;
+          }
+          return AsyncContext.run(__genFn.call(this));
+        })();
+        return result2;
+      }
+      return AsyncContext.run(__genFn.call(this));
     }
     `;
     const transformed = await transform({
