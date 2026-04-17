@@ -109,8 +109,7 @@ describe('Logger', () => {
   test('async spans', async () => {
     const logger = new Logger();
     const logsArr = collectLogs(logger);
-
-    await AsyncContext.create(async () => {
+    await logger.asyncSpan('async-operation', async () => {
       logger.info('Starting async operation');
       queueMicrotask(() => {
         logger.info('This is a log from a microtask');
@@ -122,7 +121,7 @@ describe('Logger', () => {
     async function anotherFunction() {
       logger.info('timer await');
       await new Promise((resolve) => setTimeout(resolve));
-      await AsyncContext.create(async () => {
+      await logger.asyncSpan('another-async-context', async () => {
         logger.info('This is a log from another async context');
       });
       logger.info('after timer await');

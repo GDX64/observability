@@ -74,6 +74,22 @@ export class Logger {
     return this.currentSpan?.fullSpanId || null;
   }
 
+  createSpan<T>(name: string, callback: () => T): T {
+    const span = this.span(name);
+    try {
+      return callback();
+    } finally {
+      span[Symbol.dispose]();
+    }
+  }
+
+  async asyncSpan<T>(name: string, callback: () => Promise<T>): Promise<T> {
+    const span = this.span(name);
+    const result = AsyncContext.create(callback);
+    span[Symbol.dispose]();
+    return result;
+  }
+
   span(name: string): Span {
     const baseSpanId = (++Logger.spanCounter).toString();
     const parentSpanId = this.getCurrentSpanId();
